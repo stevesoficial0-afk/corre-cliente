@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1B1F23">
+<title>Corre Cliente</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#f5f4f2;--card:#fff;--card2:#fff;--tx:#181a1c;--mut:#68706f;--acc:#ff7a1a;--acc2:#c75d00;--ok:#1a9e5c;--bad:#d7382d;--bd:#e6e3df}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+header{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(12px);padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 12px;border-bottom:1px solid var(--bd)}
+header b{font-size:19px;letter-spacing:-.02em}
+header b span{color:var(--acc)}
+main{max-width:520px;margin:0 auto;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 30px)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.k{color:var(--mut);font-size:12.5px}
+.v{font-size:24px;font-weight:700;letter-spacing:-.02em}
+input{width:100%;min-height:48px;padding:12px 14px;border:1px solid var(--bd);border-radius:12px;background:var(--card2);color:var(--tx);font:inherit;outline:none}
+input:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+label.lbl{font-size:13px;font-weight:600;color:var(--mut);display:block;margin:2px 0 6px}
+.btn{border:0;background:var(--acc);color:#fff;min-height:50px;padding:12px 20px;border-radius:14px;font-size:15.5px;font-weight:700;cursor:pointer;width:100%}
+.btn.ghost{background:transparent;border:1px solid var(--bd);color:var(--tx)}
+.btn.bad{background:var(--bad);color:#fff}
+.btn:disabled{opacity:.55}
+#map{height:190px;border-radius:14px;overflow:hidden;margin-top:10px;border:1px solid var(--bd)}
+.empty{color:var(--mut);text-align:center;padding:28px 10px;font-size:14px}
+.moto{border:1px solid var(--bd);border-radius:14px;padding:13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.moto b{display:block;font-size:15px}
+.moto .k{margin-top:2px}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:4px 10px;border-radius:8px;background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.pill.warn{background:color-mix(in srgb,var(--acc) 15%,transparent);color:var(--acc2)}
+a.wa{color:var(--ok);text-decoration:none;font-weight:600}
+.val{font-size:30px;font-weight:800;color:var(--acc2)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--tx);color:var(--bg);padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:99;pointer-events:none;max-width:88vw;text-align:center}
+#toast.show{transform:translate(-50%,0);opacity:1}
+</style>
+</head>
+<body>
+<header><b>🛵 Corre <span>Já</span></b></header>
+<main id="app"></main>
+<div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script>
+"use strict";
+const SB="https://ypexcilbnzbpqpwvvlxa.supabase.co",KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlwZXhjaWxibnpicHFwd3Z2bHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1NjQ5NjIsImV4cCI6MjEwNjE0MDk2Mn0.5ocmMrvSa7BumEJ3obzLMFiLheLHgUA1LxL33MDAu7w";
+const $=id=>document.getElementById(id);
+const brl=n=>(+n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let tToast=null;
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tToast);tToast=setTimeout(()=>t.classList.remove("show"),2600)}
+async function api(path,opt={}){
+  const r=await fetch(SB+"/rest/v1/"+path,{...opt,headers:{apikey:KEY,Authorization:"Bearer "+KEY,"Content-Type":"application/json",Prefer:opt.prefer||"return=representation",...(opt.headers||{})}});
+  if(!r.ok)throw new Error("erro "+r.status+": "+(await r.text()).slice(0,160));
+  const ct=r.headers.get("content-type")||"";
+  return ct.includes("json")?r.json():null;
+}
+function haversine(a,b,c,d){
+  const R=6371,rad=x=>x*Math.PI/180,dLat=rad(c-a),dLng=rad(d-b);
+  const s=Math.sin(dLat/2)**2+Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
+}
+async function geocode(q){
+  const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q="+encodeURIComponent(q));
+  const j=await r.json();return j&&j[0]?{lat:+j[0].lat,lng:+j[0].lon,end:j[0].display_name}:null;
+}
+// Rota real de rua, de graça, sem chave: servidor de demonstração do OSRM.
+// É um serviço público mantido pra testes — pode ficar lento ou fora do ar às vezes;
+// por isso sempre cai de volta pra linha reta se ele falhar.
+async function rota(a,b){
+  try{
+    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+    const j=await r.json();
+    const rt=j&&j.routes&&j.routes[0];if(!rt)return null;
+    return{km:rt.distance/1000,min:rt.duration/60,coords:rt.geometry.coordinates.map(c=>[c[1],c[0]])};
+  }catch(e){return null}
+}
+const motoIcon=L.divIcon({html:'<div style="font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">🏍️</div>',className:"",iconSize:[30,30],iconAnchor:[15,15]});
+const fimIcon=L.divIcon({html:'<div style="font-size:24px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">🏁</div>',className:"",iconSize:[26,26],iconAnchor:[13,24]});
+const euIcon=L.divIcon({html:'<div style="width:16px;height:16px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>',className:"",iconSize:[16,16],iconAnchor:[8,8]});
+function animarMarcador(marker,de,para,ms){
+  const t0=performance.now();
+  function passo(t){
+    const p=Math.min(1,(t-t0)/ms);
+    marker.setLatLng([de[0]+(para[0]-de[0])*p,de[1]+(para[1]-de[1])*p]);
+    if(p<1)requestAnimationFrame(passo);
+  }
+  requestAnimationFrame(passo);
+}
+
+let me={},pos=null,dest=null,map=null,poller=null,corridaId=localStorage.getItem("corrida_id")||null,rotaAtual=null,motoMarker=null,motoPosAnt=null;
+
+function onboarding(){
+  $("app").innerHTML=`<div class="card">
+    <div style="font-weight:700;margin-bottom:10px">👋 Bem-vindo!</div>
+    <label class="lbl">Seu nome</label><input id="oNome" placeholder="Nome">
+    <label class="lbl" style="margin-top:10px">Telefone (WhatsApp, opcional)</label><input id="oTel" placeholder="(49) 9....-....">
+    <button class="btn" id="oGo" style="margin-top:14px">Continuar</button>
+  </div>`;
+  $("oGo").onclick=()=>{
+    const nome=$("oNome").value.trim();if(!nome){toast("Informe seu nome");return}
+    me={nome,tel:$("oTel").value.trim()};
+    localStorage.setItem("cliente",JSON.stringify(me));
+    render();
+  };
+}
+
+function pedirTela(){
+  $("app").innerHTML=`
+  <div class="card">
+    <label class="lbl">Para onde vamos?</label>
+    <div class="row" style="gap:8px"><input id="destino" placeholder="Endereço de destino"><button class="btn" id="buscar" style="width:auto;white-space:nowrap">Buscar</button></div>
+    <div id="map"></div>
+    <div id="distInfo" class="k" style="margin-top:8px"></div>
+  </div>
+  <div class="sec" style="font-weight:700;margin:6px 2px 8px">🏍️ Motoboys disponíveis</div>
+  <div id="lista"><div class="empty">Buscando motoboys online…</div></div>
+  `;
+  initMap();
+  $("buscar").onclick=buscarDestino;
+  $("destino").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();buscarDestino()}};
+  carregarMotoboys();
+}
+
+function initMap(){
+  if(map){map.remove();map=null}
+  map=L.map("map",{zoomControl:false,attributionControl:false}).setView([pos?.lat||-27.816,pos?.lng||-50.326],13);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{subdomains:"abcd",maxZoom:20,attribution:"© OpenStreetMap, © CARTO"}).addTo(map);
+  if(pos)L.marker([pos.lat,pos.lng],{icon:euIcon}).addTo(map);
+}
+
+async function buscarDestino(){
+  const q=$("destino").value.trim();if(!q){toast("Digite um endereço");return}
+  $("buscar").disabled=true;$("buscar").textContent="…";
+  try{
+    const g=await geocode(q+", Brasil");
+    if(!g){toast("Endereço não encontrado");return}
+    dest=g;rotaAtual=null;
+    L.marker([g.lat,g.lng],{icon:fimIcon}).addTo(map);
+    if(pos){
+      const rt=await rota(pos,g);
+      if(rt){
+        rotaAtual=rt;
+        L.polyline(rt.coords,{color:"#ff7a1a",weight:5,opacity:.85}).addTo(map);
+        $("distInfo").textContent=`🛣️ ${rt.km.toFixed(1)} km de rota · 🕐 ~${Math.round(rt.min)} min até ${g.end.split(",").slice(0,2).join(",")}`;
+      }else{
+        const km=haversine(pos.lat,pos.lng,g.lat,g.lng);
+        $("distInfo").textContent="📏 "+km.toFixed(1)+" km em linha reta até "+g.end.split(",").slice(0,2).join(",")+" (rota indisponível no momento)";
+      }
+      map.fitBounds([[pos.lat,pos.lng],[g.lat,g.lng]],{padding:[24,24]});
+    }
+    listarMotoboys();
+  }catch(e){toast("Erro ao buscar endereço")}
+  finally{$("buscar").disabled=false;$("buscar").textContent="Buscar"}
+}
+function distanciaAtual(){return rotaAtual?rotaAtual.km:(pos&&dest?haversine(pos.lat,pos.lng,dest.lat,dest.lng):0)}
+
+let motoboys=[];
+async function carregarMotoboys(){
+  try{motoboys=await api("motoboys?online=eq.true&select=*")}catch(e){motoboys=[]}
+  listarMotoboys();
+}
+function listarMotoboys(){
+  const box=$("lista");if(!box)return;
+  if(!motoboys.length){box.innerHTML='<div class="empty">Nenhum motoboy online no momento.</div>';return}
+  const arr=motoboys.map(m=>({...m,dist:pos?haversine(pos.lat,pos.lng,m.lat,m.lng):null})).sort((a,b)=>(a.dist??1e9)-(b.dist??1e9));
+  box.innerHTML=arr.map(m=>{
+    const distKm=dest&&pos?distanciaAtual():null;
+    const valor=distKm!=null?distKm*m.preco_km:null;
+    return `<div class="moto">
+      <span><b>${esc(m.nome)}</b><span class="k">${brl(m.preco_km)}/km${m.dist!=null?" · "+m.dist.toFixed(1)+" km de você":""}</span></span>
+      <span style="text-align:right">${valor!=null?`<div class="v" style="font-size:18px">${brl(valor)}</div>`:""}<button class="btn" data-chamar="${m.id}" style="width:auto;margin-top:4px;padding:8px 16px">Chamar</button></span>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-chamar]").forEach(b=>b.onclick=()=>chamar(b.dataset.chamar));
+}
+
+async function chamar(motoboyId){
+  if(!dest){toast("Escolha um destino primeiro");return}
+  if(!pos){toast("Não consegui sua localização");return}
+  const distKm=distanciaAtual();
+  const m=motoboys.find(x=>x.id===motoboyId);
+  const valor=distKm*m.preco_km;
+  try{
+    const r=await api("corridas",{method:"POST",body:JSON.stringify({
+      cliente_nome:me.nome,cliente_tel:me.tel,origem_lat:pos.lat,origem_lng:pos.lng,
+      destino_lat:dest.lat,destino_lng:dest.lng,destino_end:dest.end,
+      distancia_km:distKm,valor,motoboy_id:motoboyId,status:"pendente"
+    })});
+    corridaId=r[0].id;localStorage.setItem("corrida_id",corridaId);
+    render();
+  }catch(e){toast("Erro: "+e.message)}
+}
+
+function lblStatus(s){return{pendente:"⏳ Aguardando o motoboy aceitar",aceita:"✅ Motoboy a caminho para te buscar",a_caminho:"🏍️ Motoboy a caminho",concluida:"🏁 Corrida concluída",cancelada:"✖ Cancelada",recusada:"✖ O motoboy recusou"}[s]||s}
+
+let acompTela="";
+async function acompanharTela(primeiraVez){
+  let c=null;try{c=(await api("corridas?id=eq."+corridaId+"&select=*"))[0]}catch(e){return}
+  if(!c){corridaId=null;localStorage.removeItem("corrida_id");pedirTela();return}
+  let moto=null;if(c.motoboy_id){try{moto=(await api("motoboys?id=eq."+c.motoboy_id))[0]}catch(e){}}
+  const terminal=["concluida","cancelada","recusada"].includes(c.status);
+  if(primeiraVez){
+    $("app").innerHTML=`
+    <div class="card">
+      <span class="pill" id="acStatus"></span>
+      <div class="val" id="acValor" style="margin-top:10px"></div>
+      <div class="k" style="margin-top:6px">📍 ${esc(c.destino_end||"")}</div>
+      <div class="k" id="acDist"></div>
+      <div id="acMoto"></div>
+      <div id="map" style="margin-top:12px"></div>
+      <div id="acBotoes"></div>
+    </div>`;
+    initMap();motoMarker=null;motoPosAnt=null;
+    L.marker([c.destino_lat,c.destino_lng],{icon:fimIcon}).addTo(map);
+  }
+  $("acStatus").className="pill "+(c.status==="pendente"?"warn":"");
+  $("acStatus").textContent=lblStatus(c.status);
+  $("acValor").textContent=brl(c.valor);
+  $("acDist").textContent=(+c.distancia_km).toFixed(1)+" km";
+  $("acMoto").innerHTML=moto?`<div class="row" style="margin-top:12px"><span><b>${esc(moto.nome)}</b><div class="k">${brl(moto.preco_km)}/km</div></span>${moto.telefone?`<a class="wa" target="_blank" href="https://wa.me/${soDig(moto.telefone)}">💬 Chamar no WhatsApp</a>`:""}</span></div>`:"";
+  $("acBotoes").innerHTML=terminal?`<button class="btn" id="nova" style="margin-top:14px">🔁 Pedir nova corrida</button>`
+    :`<button class="btn bad" id="cancelar" style="margin-top:14px">Cancelar corrida</button>`;
+  const nova=$("nova");if(nova)nova.onclick=()=>{corridaId=null;localStorage.removeItem("corrida_id");render()};
+  const canc=$("cancelar");if(canc)canc.onclick=async()=>{await api("corridas?id=eq."+corridaId,{method:"PATCH",body:JSON.stringify({status:"cancelada"}),prefer:"return=minimal"});corridaId=null;localStorage.removeItem("corrida_id");render()};
+  if(moto&&moto.lat){
+    const novaPos=[moto.lat,moto.lng];
+    if(motoMarker&&motoPosAnt)animarMarcador(motoMarker,motoPosAnt,novaPos,3500);
+    else motoMarker=L.marker(novaPos,{icon:motoIcon}).addTo(map);
+    motoPosAnt=novaPos;
+    if(primeiraVez&&pos)map.fitBounds([[pos.lat,pos.lng],novaPos,[c.destino_lat,c.destino_lng]],{padding:[30,30]});
+  }
+}
+function soDig(t){const d=String(t||"").replace(/\D/g,"");return d.length<=11?"55"+d:d}
+
+function pegarLocalizacao(){
+  return new Promise(res=>{
+    if(!("geolocation" in navigator)){res(null);return}
+    navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude}),()=>res(null),{enableHighAccuracy:true});
+  });
+}
+
+async function render(){
+  const saved=localStorage.getItem("cliente");
+  if(!saved){onboarding();return}
+  me=JSON.parse(saved);
+  pos=await pegarLocalizacao();
+  clearInterval(poller);
+  if(corridaId){await acompanharTela(true);poller=setInterval(()=>acompanharTela(false),4000)}
+  else{pedirTela();poller=setInterval(carregarMotoboys,6000)}
+}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+render();
+</script>
+</body>
+</html>
